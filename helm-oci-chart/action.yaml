@@ -1,0 +1,65 @@
+name: Helm OCI Chart Releaser
+description: Package and publish a Helm chart to an OCI registry, with optional Cosign signing.
+inputs:
+  name:
+    required: true
+    description: Chart name (must match Chart.yaml).
+  repository:
+    required: true
+    description: Repository path within the registry, without the chart name.
+  app-version:
+    required: false
+    description: Override the application version.
+  version:
+    required: false
+    description: Override the chart version; otherwise use Chart.yaml.
+  path:
+    required: false
+    description: Chart path; defaults to charts/{name}.
+  registry:
+    required: true
+    description: OCI registry host, optionally including a port.
+  registry-username:
+    required: true
+    description: Registry username.
+  registry-password:
+    required: true
+    description: Registry password or token.
+  update-dependencies:
+    required: false
+    default: 'false'
+    description: Update chart dependencies before packaging.
+  sign-image:
+    required: false
+    default: 'false'
+    description: Sign the chart with an already installed Cosign.
+  signature-repository:
+    required: false
+    description: Optional override for the Cosign signature repository.
+outputs:
+  digest:
+    value: ${{ steps.publish.outputs.digest }}
+    description: Published chart digest.
+  image:
+    value: ${{ steps.publish.outputs.image }}
+    description: Published registry/repository/chart:version reference.
+runs:
+  using: composite
+  steps:
+    - name: Package and publish
+      id: publish
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        CHART_NAME: ${{ inputs.name }}
+        CHART_PATH: ${{ inputs.path }}
+        CHART_VERSION: ${{ inputs.version }}
+        APP_VERSION: ${{ inputs.app-version }}
+        REGISTRY: ${{ inputs.registry }}
+        REPOSITORY: ${{ inputs.repository }}
+        REGISTRY_USERNAME: ${{ inputs.registry-username }}
+        REGISTRY_PASSWORD: ${{ inputs.registry-password }}
+        UPDATE_DEPENDENCIES: ${{ inputs.update-dependencies }}
+        SIGN_IMAGE: ${{ inputs.sign-image }}
+        COSIGN_REPOSITORY: ${{ inputs.signature-repository }}
+      run: bash "$ACTION_PATH/publish.sh"

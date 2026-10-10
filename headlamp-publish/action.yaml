@@ -1,0 +1,103 @@
+name: Publish Headlamp plugin
+description: Build a plugin, publish its GitHub release archive, and update an Artifact Hub branch.
+
+inputs:
+  token:
+    description: GitHub token with contents write permission in the caller repository.
+    required: false
+    default: ${{ github.token }}
+  build-root:
+    description: Plugin directory relative to the checked-out repository.
+    required: false
+    default: headlamp/
+  target-branch:
+    description: Branch containing the versioned Artifact Hub metadata.
+    required: false
+    default: artifacthub
+  tag:
+    description: Existing release tag (a semantic version, optionally prefixed with v).
+    required: false
+    default: ${{ github.ref_name }}
+  package-name:
+    description: Artifact Hub package directory/name; defaults to package.json name.
+    required: false
+  metadata-template:
+    description: YAML template relative to build-root; otherwise discover it in the plugin or target branch.
+    required: false
+  node-version:
+    description: Node.js version used for the plugin build (24 or newer).
+    required: false
+    default: '24'
+
+outputs:
+  version:
+    description: Plugin version without the v prefix.
+    value: ${{ steps.build.outputs.version }}
+  archive:
+    description: Absolute path to the packaged plugin archive.
+    value: ${{ steps.build.outputs.archive }}
+  checksum:
+    description: SHA-256 of the archive, without the sha256 prefix.
+    value: ${{ steps.build.outputs.checksum }}
+  archive-url:
+    description: GitHub release download URL.
+    value: ${{ steps.build.outputs.archive-url }}
+  metadata-path:
+    description: Versioned metadata path on target-branch.
+    value: ${{ steps.build.outputs.metadata-path }}
+  commit:
+    description: Published metadata commit (also returned for an unchanged retry).
+    value: ${{ steps.publish.outputs.commit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+      with:
+        node-version: ${{ inputs.node-version }}
+    - name: Install action dependencies
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: npm ci --ignore-scripts --no-audit --no-fund --prefix "$ACTION_PATH/.."
+    - name: Build and package plugin
+      id: build
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        INPUT_BUILD_ROOT: ${{ inputs.build-root }}
+        INPUT_TARGET_BRANCH: ${{ inputs.target-branch }}
+        INPUT_TAG: ${{ inputs.tag }}
+        INPUT_PACKAGE_NAME: ${{ inputs.package-name }}
+        INPUT_METADATA_TEMPLATE: ${{ inputs.metadata-template }}
+      run: node "$ACTION_PATH/publish.mjs" build
+    - name: Prepare Artifact Hub metadata
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        STATE_FILE: ${{ steps.build.outputs.state }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: node "$ACTION_PATH/publish.mjs" prepare
+    - name: Publish release archive
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        STATE_FILE: ${{ steps.build.outputs.state }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: node "$ACTION_PATH/publish.mjs" release
+    - name: Publish metadata branch
+      id: publish
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        STATE_FILE: ${{ steps.build.outputs.state }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: node "$ACTION_PATH/publish.mjs" publish
+    - name: Clean up temporary checkout
+      if: always() && steps.build.outputs.state != ''
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        STATE_FILE: ${{ steps.build.outputs.state }}
+      run: node "$ACTION_PATH/publish.mjs" cleanup

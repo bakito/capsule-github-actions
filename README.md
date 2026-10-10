@@ -1,2 +1,43 @@
-# github-actions
-Reusable github actions
+# Project Capsule GitHub Actions
+
+Shared composite actions for plugin checks and release workflows. Use them from a
+job after checking out the caller's repository. Publishing requires a trusted tag or manual release
+workflow with the permissions listed by each action. Examples use `@main`; pin a
+reviewed commit SHA in production.
+
+| Action | Purpose |
+| --- | --- |
+| [headlamp-test](headlamp-test/README.md) | Lint, check formatting and types, test, and build a Headlamp plugin from a configurable directory. Includes a workflow template. |
+| [headlamp-publish](headlamp-publish/README.md) | Build a Headlamp plugin, upload its GitHub release archive, and publish versioned Artifact Hub metadata to a configurable branch. |
+| [helm-oci-chart](helm-oci-chart/README.md) | Package and push a Helm chart to an OCI registry, with optional signing. |
+| [make-ko-publish](make-ko-publish/README.md) | Publish a ko image through a Make target, generate and attach a CycloneDX SBOM, and optionally sign it. |
+| [exists](exists/README.md) | Return whether an input is nonempty. |
+
+The three imported actions retain the upstream paths and input names. See
+[UPSTREAM.md](UPSTREAM.md) for provenance and adaptations. All code is licensed
+under [Apache-2.0](LICENSE).
+
+## Development
+
+Use Node.js 24 or newer, npm, Git, Bash, actionlint 1.7.7, and ShellCheck:
+
+```sh
+npm ci --ignore-scripts
+npm test
+npm run lint
+shellcheck helm-oci-chart/publish.sh make-ko-publish/publish.sh
+# With Helm installed (CI uses 4.2.0):
+npm run test:helm
+```
+
+`ACTIONLINT=/path/to/actionlint npm run lint` selects a local actionlint binary.
+Lint checks both repository workflows and composite steps wrapped as reusable
+workflows. Tests use real temporary Git repositories and npm fixtures, a mock
+GitHub API, and stub registry tools; they never publish to GitHub or a registry.
+`test:helm` additionally uses real Helm packaging and inspection while stubbing
+registry calls. CI also invokes the `exists` composite itself.
+
+Keep input values in environment variables and quote their use in scripts. Pin
+external actions to commit SHAs. Test failure paths and credential cleanup when
+changing publishing behavior. Container publication is a separate workflow step;
+the Headlamp action returns archive details for downstream consumers.

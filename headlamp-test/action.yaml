@@ -1,0 +1,48 @@
+name: Test Headlamp plugin
+description: Install dependencies, lint, check formatting and types, test, and build a Headlamp plugin.
+
+inputs:
+  build-root:
+    description: Plugin directory relative to the checked-out repository.
+    required: false
+    default: headlamp/
+  node-version:
+    description: Node.js version used for the plugin checks.
+    required: false
+    default: '24'
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: npm
+        cache-dependency-path: ${{ inputs.build-root }}/package-lock.json
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ inputs.build-root }}
+      run: npm ci --include=dev --no-audit --no-fund
+    - name: Lint
+      shell: bash
+      working-directory: ${{ inputs.build-root }}
+      run: npm run lint
+    - name: Format check
+      shell: bash
+      working-directory: ${{ inputs.build-root }}
+      run: npm run format -- --check
+    - name: Type check
+      shell: bash
+      working-directory: ${{ inputs.build-root }}
+      run: npm run tsc
+    - name: Test
+      shell: bash
+      working-directory: ${{ inputs.build-root }}
+      env:
+        CI: 'true'
+      run: npm test
+    - name: Build
+      shell: bash
+      working-directory: ${{ inputs.build-root }}
+      run: npm run build
