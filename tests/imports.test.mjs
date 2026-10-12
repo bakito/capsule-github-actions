@@ -89,45 +89,50 @@ for (const flag of ['FAIL_PUSH', 'BAD_DIGEST', 'WRONG_NAME']) {
 
 function ko(t) {
   const f = fixture(t);
-  Object.assign(f.env, { MAKEFILE_TARGET: 'ko-publish', VERSION: 'v1.2.3', VERSION_REQUIRED: 'true', SBOM_NAME: 'example' });
-  f.stub('make', `
+  Object.assign(f.env, { TASKFILE_TARGET: 'image:publish', VERSION: 'v1.2.3', VERSION_REQUIRED: 'true', SBOM_NAME: 'example' });
+  f.stub('task', `
 fs.appendFileSync(process.env.CALL_LOG, JSON.stringify({args, username:process.env.REGISTRY_USERNAME,
   password:process.env.REGISTRY_PASSWORD, version:process.env.VERSION, repository:process.env.REPOSITORY}) + '\\n');
-if (process.env.FAIL_MAKE) process.exit(1);
+if (process.env.FAIL_TASK) process.exit(1);
 console.log(process.env.BAD_IMAGE || ('ghcr.io/projectcapsule/example@' + process.env.TEST_DIGEST));
 `);
   return f;
 }
 
-test('ko passes registry credentials and version to make and returns the image digest', t => {
-  const f = ko(t); const result = f.invoke('make-ko-publish');
+test('ko passes registry credentials and version to Task and returns the image digest', t => {
+  const f = ko(t); const result = f.invoke('task-ko-publish');
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(f.calls()[0], { args: ['--', 'ko-publish'], username: f.env.REGISTRY_USERNAME,
+  assert.deepEqual(f.calls()[0], { args: ['--silent', '--output=interleaved', 'image:publish'], username: f.env.REGISTRY_USERNAME,
     password: f.env.REGISTRY_PASSWORD, version: 'v1.2.3', repository: f.env.REPOSITORY });
   assert.match(fs.readFileSync(f.env.GITHUB_OUTPUT, 'utf8'), new RegExp(`digest=${digest}`));
 });
 
-for (const [key, value] of [['VERSION', ''], ['VERSION', '$(false)'], ['MAKEFILE_TARGET', '-f evil'], ['SBOM_NAME', '../outside']]) {
-  test(`ko rejects invalid ${key} before executing make`, t => {
+for (const [key, value] of [
+  ['VERSION', ''], ['VERSION', '$(false)'], ['SBOM_NAME', '../outside'],
+  ['TASKFILE_TARGET', ''], ['TASKFILE_TARGET', '--taskfile=evil.yml'],
+  ['TASKFILE_TARGET', 'image:publish other'], ['TASKFILE_TARGET', 'image:*'],
+  ['TASKFILE_TARGET', 'image:publish VERSION=evil'], ['TASKFILE_TARGET', 'image:publish; touch unexpected'],
+]) {
+  test(`ko rejects invalid ${key} before executing Task`, t => {
     const f = ko(t); f.env[key] = value;
-    assert.notEqual(f.invoke('make-ko-publish').status, 0);
+    assert.notEqual(f.invoke('task-ko-publish').status, 0);
     assert.equal(f.calls().length, 0);
   });
 }
 
-test('ko permits an explicitly optional version and rejects malformed make output', t => {
+test('ko permits an explicitly optional version and rejects malformed Task output', t => {
   const f = ko(t); f.env.VERSION_REQUIRED = 'false'; f.env.VERSION = '';
-  assert.equal(f.invoke('make-ko-publish').status, 0);
+  assert.equal(f.invoke('task-ko-publish').status, 0);
   fs.unlinkSync(f.env.GITHUB_OUTPUT);
   f.env.BAD_IMAGE = `build log\nghcr.io/example@${digest}`;
-  assert.notEqual(f.invoke('make-ko-publish').status, 0);
+  assert.notEqual(f.invoke('task-ko-publish').status, 0);
   assert.equal(fs.existsSync(f.env.GITHUB_OUTPUT), false);
-  delete f.env.BAD_IMAGE; f.env.FAIL_MAKE = '1';
-  assert.notEqual(f.invoke('make-ko-publish').status, 0);
+  delete f.env.BAD_IMAGE; f.env.FAIL_TASK = '1';
+  assert.notEqual(f.invoke('task-ko-publish').status, 0);
 });
 
 test('action manifests keep all inputs and output references valid and pin external actions', () => {
-  for (const action of ['exists', 'helm-oci-chart', 'make-ko-publish', 'headlamp-publish', 'headlamp-test']) {
+  for (const action of ['exists', 'helm-oci-chart', 'task-ko-publish', 'headlamp-publish', 'headlamp-test']) {
     const source = fs.readFileSync(path.join(repository, action, 'action.yaml'), 'utf8');
     const metadata = YAML.parse(source);
     assert.equal(metadata.runs.using, 'composite');
@@ -148,4 +153,8 @@ test('action manifests keep all inputs and output references valid and pin exter
   const headlamp = YAML.parse(fs.readFileSync(path.join(repository, 'headlamp-publish/action.yaml'), 'utf8'));
   assert.equal(headlamp.inputs['build-root'].default, 'headlamp/');
   assert.equal(headlamp.inputs['target-branch'].default, 'artifacthub');
+  const ko = YAML.parse(fs.readFileSync(path.join(repository, 'task-ko-publish/action.yaml'), 'utf8'));
+  assert.equal(ko.inputs['taskfile-target'].required, true);
+  assert.equal(ko.inputs['makefile-target'], undefined);
+  assert.equal(ko.runs.steps[0].env.TASKFILE_TARGET, '${{ inputs.taskfile-target }}');
 });

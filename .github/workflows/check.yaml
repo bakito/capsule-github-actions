@@ -30,12 +30,16 @@ jobs:
         with:
           go-version: '1.25'
           cache: false
-      - name: Install actionlint
-        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+      - name: Install actionlint and Task
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          go install github.com/go-task/task/v3/cmd/task@v3.53.1
+      - name: Real Task target integration
+        run: npm run test:task
       - name: Validate workflows and composite actions
         run: npm run lint
       - name: Check shell scripts
-        run: shellcheck helm-oci-chart/publish.sh make-ko-publish/publish.sh
+        run: shellcheck helm-oci-chart/publish.sh task-ko-publish/publish.sh
       - name: Exercise exists action
         id: exists
         uses: ./exists

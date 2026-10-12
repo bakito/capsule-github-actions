@@ -1,24 +1,24 @@
-name: Make KO publish
-description: Publish a ko image via make, generate and attach a CycloneDX SBOM, and optionally sign the image.
+name: Task ko publish
+description: Publish a ko image via Task, generate and attach a CycloneDX SBOM, and optionally sign the image.
 inputs:
-  makefile-target:
+  taskfile-target:
     required: true
-    description: Single make target that prints only the immutable image reference to stdout.
+    description: Single Task target that prints only the immutable image reference to stdout.
   registry:
     required: true
     description: Registry host.
   registry-username:
     required: true
-    description: Registry username passed to make as REGISTRY_USERNAME.
+    description: Registry username passed to Task as REGISTRY_USERNAME.
   registry-password:
     required: true
-    description: Registry password passed to make as REGISTRY_PASSWORD.
+    description: Registry password passed to Task as REGISTRY_PASSWORD.
   repository:
     required: true
     description: Repository passed as REPO and the default REPOSITORY environment value.
   version:
     required: false
-    description: Image tag passed to make as VERSION.
+    description: Image tag passed to Task as VERSION.
   version-required:
     required: false
     default: 'true'
@@ -54,7 +54,7 @@ runs:
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
-        MAKEFILE_TARGET: ${{ inputs.makefile-target }}
+        TASKFILE_TARGET: ${{ inputs.taskfile-target }}
         REGISTRY: ${{ inputs.registry }}
         REPO: ${{ inputs.repository }}
         REPOSITORY: ${{ env.REPOSITORY || inputs.repository }}

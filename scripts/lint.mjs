@@ -12,7 +12,7 @@ try {
   // actionlint validates workflows rather than composite action manifests.
   // Wrap each composite's actual steps and outputs in a reusable workflow so
   // expressions, inputs, step references, and inline shell are also checked.
-  for (const name of ['exists', 'helm-oci-chart', 'make-ko-publish', 'headlamp-publish', 'headlamp-test']) {
+  for (const name of ['exists', 'helm-oci-chart', 'task-ko-publish', 'headlamp-publish', 'headlamp-test']) {
     const action = YAML.parse(fs.readFileSync(path.join(root, name, 'action.yaml'), 'utf8'));
     const inputs = Object.fromEntries(Object.entries(action.inputs).map(([key, value]) =>
       [key, { type: 'string', description: value.description, required: false }]));

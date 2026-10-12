@@ -6,6 +6,7 @@
   "scripts": {
     "lint": "node scripts/lint.mjs",
     "test": "node --test tests/*.test.mjs",
+    "test:task": "node --test tests/task.integration.mjs",
     "test:helm": "node --test tests/helm.integration.mjs"
   },
   "dependencies": {
