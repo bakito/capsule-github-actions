@@ -87,28 +87,38 @@ export function build(env = process.env) {
   }
   const template = env.INPUT_METADATA_TEMPLATE ? within(root, env.INPUT_METADATA_TEMPLATE) : null;
   if (template && !fs.statSync(template).isFile()) throw new Error('Metadata template must be a file');
-  if (fs.readdirSync(root).some(file => file.endsWith('.tar.gz'))) {
-    throw new Error('Remove existing .tar.gz archives from build-root before packaging');
-  }
   const sourceCommit = run('git', ['rev-parse', 'HEAD'], { cwd: workspace });
-  const options = { cwd: root, env, stdio: 'inherit' };
-  run('npm', ['ci', '--no-audit', '--no-fund'], options);
-  run('npm', ['version', version, '--no-git-tag-version', '--allow-same-version', '--ignore-scripts'], options);
-  run('npm', ['run', 'build'], options);
-  run('npm', ['run', 'package'], options);
-  const archives = fs.readdirSync(root).filter(file => file.endsWith('.tar.gz'));
-  if (archives.length !== 1) throw new Error('Packaging must produce exactly one .tar.gz archive in build-root');
-  const archive = within(root, archives[0]);
+  const prebuilt = Boolean(env.INPUT_ARCHIVE);
+  let archive;
+  if (prebuilt) {
+    within(workspace, env.INPUT_ARCHIVE);
+    const archives = fs.globSync(env.INPUT_ARCHIVE, { cwd: workspace });
+    if (archives.length !== 1) throw new Error('archive must match exactly one .tar.gz file within the checkout');
+    archive = within(workspace, archives[0]);
+    if (!archive.endsWith('.tar.gz')) throw new Error('archive must be a .tar.gz file');
+  } else {
+    if (fs.readdirSync(root).some(file => file.endsWith('.tar.gz'))) {
+      throw new Error('Remove existing .tar.gz archives from build-root before packaging');
+    }
+    const options = { cwd: root, env, stdio: 'inherit' };
+    run('npm', ['ci', '--no-audit', '--no-fund'], options);
+    run('npm', ['version', version, '--no-git-tag-version', '--allow-same-version', '--ignore-scripts'], options);
+    run('npm', ['run', 'build'], options);
+    run('npm', ['run', 'package'], options);
+    const archives = fs.readdirSync(root).filter(file => file.endsWith('.tar.gz'));
+    if (archives.length !== 1) throw new Error('Packaging must produce exactly one .tar.gz archive in build-root');
+    archive = within(root, archives[0]);
+  }
   if (!fs.statSync(archive).isFile() || fs.statSync(archive).size === 0) throw new Error('Plugin archive is empty or not a file');
   const server = env.GITHUB_SERVER_URL || 'https://github.com';
   const directory = fs.mkdtempSync(path.join(env.RUNNER_TEMP || os.tmpdir(), 'headlamp-publish-'));
   const state = {
     stateFile: path.join(directory, 'state.json'), directory, root, workspace,
-    sourceCommit, tag, version, branch, name, template, archive, checksum: sha256(archive),
+    sourceCommit, tag, version, branch, name, template, archive, prebuilt, checksum: sha256(archive),
     repository: env.GITHUB_REPOSITORY, server,
     api: env.GITHUB_API_URL || 'https://api.github.com',
     remote: `${server}/${env.GITHUB_REPOSITORY}.git`,
-    archiveURL: `${server}/${env.GITHUB_REPOSITORY}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(archives[0])}`,
+    archiveURL: `${server}/${env.GITHUB_REPOSITORY}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(path.basename(archive))}`,
     metadataPath: `${name}/${version}/artifacthub-pkg.yml`,
   };
   save(state);
@@ -236,6 +246,9 @@ export async function release(state, token, fetcher = fetch) {
     throw new Error('Release tag does not resolve to the checked-out source commit');
   }
   const found = await request(`${base}/releases/tags/${encodeURIComponent(state.tag)}`, {}, true);
+  if (!found && state.prebuilt) {
+    throw new Error('Prebuilt archive requires an existing published release; publish it before running this action');
+  }
   const published = found ? await found.json() : await (await request(`${base}/releases`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tag_name: state.tag, name: `Release ${state.tag}`, generate_release_notes: true,
@@ -258,6 +271,12 @@ export async function release(state, token, fetcher = fetch) {
     }
     if (digest !== `sha256:${state.checksum}`) throw new Error('Release asset already exists with different content; publish a new version');
     return;
+  }
+  if (state.prebuilt) {
+    throw new Error('Prebuilt archive is not attached to the release; publish it and its signatures before metadata');
+  }
+  if (published.immutable) {
+    throw new Error('Cannot add an archive to an immutable release; include it before publication and use the archive input');
   }
   const upload = new URL(published.upload_url.replace(/\{.*$/, ''));
   upload.searchParams.set('name', filename);

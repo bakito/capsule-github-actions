@@ -6,6 +6,11 @@ Builds a plugin with `npm ci`, `npm run build`, and `npm run package`; uploads i
 to `headlamp/`. Container-image building, signing, and attestations can follow as
 separate steps in the caller's workflow.
 
+When GoReleaser or another release tool already packages, signs, and uploads the
+plugin, pass its archive through `archive` to publish only the Artifact Hub
+metadata. The action verifies the released archive's checksum without rebuilding
+the plugin, changing source package files, or creating or uploading release assets.
+
 ```yaml
 name: Publish Headlamp plugin
 on:
@@ -45,6 +50,7 @@ in the source checkout, without committing them.
 | Input | Default | Meaning |
 | --- | --- | --- |
 | `build-root` | `headlamp/` | Plugin path relative to `GITHUB_WORKSPACE`; `.` builds at the repository root. |
+| `archive` | empty | Prebuilt `.tar.gz` path or glob relative to `GITHUB_WORKSPACE`; must match exactly one file already attached to the published release. Skips plugin installation, version changes, building, packaging, and release uploads. |
 | `target-branch` | `artifacthub` | Branch to update or create for metadata. |
 | `tag` | `github.ref_name` | Existing tag matching the checked-out commit; exact SemVer with optional `v`, including prereleases, without `+` build metadata. |
 | `package-name` | `package.json` name | Artifact Hub package name and directory; lowercase letters, digits, and hyphens. Override this for scoped npm names. |
@@ -52,11 +58,41 @@ in the source checkout, without committing them.
 | `node-version` | `24` | Node.js version, at least 24. |
 | `token` | `github.token` | Token with `contents: write` in the caller repository. |
 
-Requires an Ubuntu runner, a checked-out repository, `package.json`, a compatible
-`package-lock.json`, and working `build` and `package` npm scripts. Packaging must
+Requires an Ubuntu runner, a checked-out repository, and `package.json`.
+Without `archive`, also requires a compatible
+`package-lock.json` and working `build` and `package` npm scripts. Packaging must
 produce exactly one nonempty `.tar.gz` directly in `build-root`, which must not
 already contain archives. Run the plugin's own lint and test checks before this
 action. The action executes the plugin's trusted npm scripts.
+
+## Combining with GoReleaser
+
+Include the plugin archive in GoReleaser's archives, checksums, SBOMs, and Cosign
+signing. Publish all assets together before the release becomes immutable, then
+invoke this action with the exact archive that GoReleaser uploaded:
+
+```yaml
+- name: Publish release artifacts
+  run: devbox run -- task release
+  env:
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+- uses: projectcapsule/github-actions/headlamp-publish@main
+  with:
+    build-root: headlamp/
+    archive: dist/resource-permits-*.tar.gz
+    target-branch: headlamp-plugin
+    metadata-template: artifacthub-pkg.yml
+```
+
+Pin a reviewed action commit SHA in production. Run this only after the release
+tool succeeds, in the same tag-only job with `contents: write`. Keep pull-request
+checks in a separate read-only workflow.
+
+The glob must identify one nonempty archive within the source checkout. Symlinks
+and paths escaping the checkout are rejected. Existing releases and assets must
+already exist and match the local SHA-256. A missing release, missing asset, or
+checksum mismatch fails before publishing metadata. Cosign bundles remain owned
+by the release tool; this action leaves all release assets intact.
 
 ## Metadata and first publication
 

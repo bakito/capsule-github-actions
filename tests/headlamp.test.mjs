@@ -42,6 +42,74 @@ function commit(checkout, message = 'fixture') {
     'commit', '--quiet', '-m', message], { cwd: checkout });
 }
 
+function prebuiltFixture(t) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'headlamp-prebuilt-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const workspace = path.join(directory, 'workspace');
+  const root = path.join(workspace, 'headlamp');
+  const dist = path.join(workspace, 'dist');
+  fs.mkdirSync(root, { recursive: true });
+  fs.mkdirSync(dist);
+  const pkg = JSON.stringify({ name: 'capsule', version: '0.0.0',
+    scripts: { build: 'exit 99', package: 'exit 99' } });
+  fs.writeFileSync(path.join(root, 'package.json'), pkg);
+  const archive = path.join(dist, 'capsule-1.2.3.tar.gz');
+  fs.writeFileSync(archive, 'prebuilt archive bytes');
+  run('git', ['init', '--quiet', workspace]);
+  commit(workspace);
+  const env = { ...process.env, GITHUB_WORKSPACE: workspace, RUNNER_TEMP: directory,
+    GITHUB_OUTPUT: path.join(directory, 'outputs'), GITHUB_REPOSITORY: 'projectcapsule/example',
+    INPUT_TAG: 'v1.2.3', INPUT_BUILD_ROOT: 'headlamp/', INPUT_ARCHIVE: 'dist/*.tar.gz' };
+  return { directory, workspace, root, dist, archive, pkg, env };
+}
+
+test('prebuilt archives skip npm and reuse an immutable release without API mutations', async t => {
+  const f = prebuiltFixture(t);
+  fs.writeFileSync(path.join(f.root, 'stale.tar.gz'), 'unrelated plugin archive');
+  const state = build(f.env);
+  assert.equal(state.archive, fs.realpathSync(f.archive));
+  assert.equal(state.prebuilt, true);
+  assert.equal(state.checksum, sha256(f.archive));
+  assert.equal(fs.readFileSync(path.join(f.root, 'package.json'), 'utf8'), f.pkg);
+  assert.equal(fs.existsSync(path.join(f.root, 'package-lock.json')), false);
+  assert.equal(fs.existsSync(path.join(f.root, 'node_modules')), false);
+  assert.equal(fs.readFileSync(f.archive, 'utf8'), 'prebuilt archive bytes');
+  assert.match(fs.readFileSync(f.env.GITHUB_OUTPUT, 'utf8'), /metadata-path=capsule\/1.2.3\/artifacthub-pkg.yml/);
+  const api = fakeGitHub(state, { exists: true, immutable: true, asset: { digest: `sha256:${state.checksum}` } });
+  await release(state, 'test-token', api.fetch);
+  assert.equal(api.calls.filter(call => ['POST', 'DELETE', 'PATCH'].includes(call.method)).length, 0);
+});
+
+test('prebuilt archive paths preserve spaces and encode the release download URL', t => {
+  const f = prebuiltFixture(t);
+  const filename = 'plugin archive.tar.gz';
+  fs.renameSync(f.archive, path.join(f.dist, filename));
+  f.env.INPUT_ARCHIVE = `dist/${filename}`;
+  const state = build(f.env);
+  assert.equal(state.archive, fs.realpathSync(path.join(f.dist, filename)));
+  assert.ok(state.archiveURL.endsWith('/v1.2.3/plugin%20archive.tar.gz'));
+});
+
+for (const [name, mutate, expected] of [
+  ['no matches', f => { f.env.INPUT_ARCHIVE = 'dist/missing*.tar.gz'; }, /exactly one/],
+  ['multiple matches', f => { fs.writeFileSync(path.join(f.dist, 'other.tar.gz'), 'other'); }, /exactly one/],
+  ['empty file', f => { fs.writeFileSync(f.archive, ''); }, /empty or not a file/],
+  ['directory', f => { fs.unlinkSync(f.archive); fs.mkdirSync(f.archive); }, /empty or not a file/],
+  ['wrong extension', f => { fs.renameSync(f.archive, path.join(f.dist, 'plugin.zip')); f.env.INPUT_ARCHIVE = 'dist/*.zip'; }, /\.tar\.gz/],
+  ['absolute path', f => { f.env.INPUT_ARCHIVE = f.archive; }, /relative path/],
+  ['path traversal', f => { f.env.INPUT_ARCHIVE = '../outside/*.tar.gz'; }, /escapes/],
+  ['archive symlink', f => { const link = path.join(f.dist, 'link.tar.gz'); fs.symlinkSync(f.archive, link); f.env.INPUT_ARCHIVE = 'dist/link.tar.gz'; }, /Symlinks/],
+  ['directory symlink', f => { fs.symlinkSync(f.dist, path.join(f.workspace, 'linked')); f.env.INPUT_ARCHIVE = 'linked/*.tar.gz'; }, /Symlinks/],
+]) {
+  test(`prebuilt archive rejects ${name} before publication`, t => {
+    const f = prebuiltFixture(t);
+    mutate(f);
+    assert.throws(() => build(f.env), expected);
+    assert.equal(fs.existsSync(f.env.GITHUB_OUTPUT), false);
+    assert.equal(fs.readFileSync(path.join(f.root, 'package.json'), 'utf8'), f.pkg);
+  });
+}
+
 test('first publication creates only the selected metadata branch, repeat is unchanged', t => {
   const { state, env } = fixture(t);
   prepare(state, env);
@@ -196,7 +264,7 @@ function fakeGitHub(state, options = {}) {
       assert.equal(init.headers.Authorization, 'Bearer test-token');
       if (address.includes('/git/ref/tags/')) return json({ object: options.annotated ? { type: 'tag', sha: 'tagsha' } : { type: 'commit', sha: options.commit || state.sourceCommit } });
       if (address.includes('/git/tags/')) return json({ object: { type: 'commit', sha: state.sourceCommit } });
-      if (address.includes('/releases/tags/')) return options.exists ? json({ id: 7 }) : json({}, options.error || 404);
+      if (address.includes('/releases/tags/')) return options.exists ? json({ id: 7, immutable: Boolean(options.immutable) }) : json({}, options.error || 404);
       if (address.endsWith('/releases') && init.method === 'POST') return json({ id: 7, upload_url: 'https://uploads.github.com/repos/projectcapsule/example/releases/7/assets{?name,label}' }, 201);
       if (address.includes('?per_page=')) return json(options.asset ? [{ id: 9, name: path.basename(state.archive), ...options.asset }] : []);
       if (address.includes('/releases/assets/9')) return new Response(fs.readFileSync(state.archive));
@@ -225,6 +293,27 @@ test('identical assets are reused with digest or download verification', async t
     await release(state, 'test-token', api.fetch);
     assert.equal(api.calls.filter(call => call.method === 'POST').length, 0);
   }
+});
+
+test('prebuilt archives reject missing releases, missing assets, and changed bytes without API mutations', async t => {
+  const { state } = fixture(t);
+  state.prebuilt = true;
+  for (const [options, expected] of [
+    [{}, /existing published release/],
+    [{ exists: true, immutable: true }, /not attached to the release/],
+    [{ exists: true, asset: { digest: `sha256:${'b'.repeat(64)}` } }, /different content/],
+  ]) {
+    const api = fakeGitHub(state, options);
+    await assert.rejects(release(state, 'test-token', api.fetch), expected);
+    assert.equal(api.calls.filter(call => ['POST', 'DELETE', 'PATCH'].includes(call.method)).length, 0);
+  }
+});
+
+test('missing archives on immutable releases fail clearly before attempting an upload', async t => {
+  const { state } = fixture(t);
+  const api = fakeGitHub(state, { exists: true, immutable: true });
+  await assert.rejects(release(state, 'test-token', api.fetch), /Cannot add an archive to an immutable release/);
+  assert.equal(api.calls.filter(call => ['POST', 'DELETE', 'PATCH'].includes(call.method)).length, 0);
 });
 
 test('release does not overwrite different assets or hide authorization failures', async t => {

@@ -8,7 +8,7 @@ reviewed commit SHA in production.
 | Action | Purpose |
 | --- | --- |
 | [headlamp-test](headlamp-test/README.md) | Lint, check formatting and types, test, and build a Headlamp plugin from a configurable directory. Includes a workflow template. |
-| [headlamp-publish](headlamp-publish/README.md) | Build a Headlamp plugin, upload its GitHub release archive, and publish versioned Artifact Hub metadata to a configurable branch. |
+| [headlamp-publish](headlamp-publish/README.md) | Build a Headlamp plugin or reuse an already published archive, then publish versioned Artifact Hub metadata to a configurable branch. |
 | [helm-oci-chart](helm-oci-chart/README.md) | Package and push a Helm chart to an OCI registry, with optional signing. |
 | [task-ko-publish](task-ko-publish/README.md) | Publish a ko image through a Task target, generate and attach a CycloneDX SBOM, and optionally sign it. |
 | [exists](exists/README.md) | Return whether an input is nonempty. |

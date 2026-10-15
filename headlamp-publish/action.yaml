@@ -1,5 +1,5 @@
 name: Publish Headlamp plugin
-description: Build a plugin, publish its GitHub release archive, and update an Artifact Hub branch.
+description: Build or reuse a plugin archive and publish versioned Artifact Hub metadata.
 
 inputs:
   token:
@@ -10,6 +10,9 @@ inputs:
     description: Plugin directory relative to the checked-out repository.
     required: false
     default: headlamp/
+  archive:
+    description: Prebuilt .tar.gz path or glob relative to the checkout. Must match one archive already attached to the release; skips plugin builds and release uploads.
+    required: false
   target-branch:
     description: Branch containing the versioned Artifact Hub metadata.
     required: false
@@ -61,12 +64,13 @@ runs:
       env:
         ACTION_PATH: ${{ github.action_path }}
       run: npm ci --ignore-scripts --no-audit --no-fund --prefix "$ACTION_PATH/.."
-    - name: Build and package plugin
+    - name: Prepare plugin archive
       id: build
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
         INPUT_BUILD_ROOT: ${{ inputs.build-root }}
+        INPUT_ARCHIVE: ${{ inputs.archive }}
         INPUT_TARGET_BRANCH: ${{ inputs.target-branch }}
         INPUT_TAG: ${{ inputs.tag }}
         INPUT_PACKAGE_NAME: ${{ inputs.package-name }}
@@ -79,7 +83,7 @@ runs:
         STATE_FILE: ${{ steps.build.outputs.state }}
         GH_TOKEN: ${{ inputs.token }}
       run: node "$ACTION_PATH/publish.mjs" prepare
-    - name: Publish release archive
+    - name: Verify or publish release archive
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
