@@ -1,0 +1,98 @@
+version: '3'
+
+silent: true
+
+set: [errexit, nounset, pipefail]
+
+vars:
+  ACTIONS:
+    sh: find . -name 'action.yaml' -not -path './node_modules/*' -print0 | sort -z | xargs -0
+
+tasks:
+  default:
+    desc: List available tasks.
+    cmds:
+      - task --list
+
+  ### Node.js tasks ###
+
+  npm:ci:
+    desc: Install Node.js dependencies.
+    cmds:
+      - npm ci --ignore-scripts --no-audit --no-fund
+
+  test:
+    desc: Run unit and local integration tests.
+    deps: [npm:ci]
+    cmds:
+      - npm test
+
+  test:helm:
+    desc: Run Helm packaging integration tests.
+    deps: [npm:ci]
+    cmds:
+      - npm run test:helm
+
+  test:task:
+    desc: Run Task target integration tests.
+    deps: [npm:ci]
+    cmds:
+      - npm run test:task
+
+  ### Lint tasks ###
+
+  lint:actions:
+    desc: Validate GitHub Actions and composite actions.
+    aliases: [lint-actions]
+    cmds:
+      - node scripts/lint.mjs
+
+  lint:shell:
+    desc: Check shell scripts with shellcheck.
+    aliases: [lint-shell]
+    cmds:
+      - shellcheck helm-oci-chart/publish.sh task-ko-publish/publish.sh
+
+  lint:zizmor:
+    desc: Security-lint GitHub Actions workflows and composite actions with zizmor.
+    aliases: [lint-zizmor]
+    cmds:
+      - zizmor -q .github/workflows/ {{.ACTIONS}}
+
+  lint:zizmor-fix:
+    desc: Security-lint GitHub Actions workflows and composite actions with zizmor and auto-fix.
+    aliases: [lint-zizmor-fix]
+    cmds:
+      - zizmor -q .github/workflows/ {{.ACTIONS}} --fix=all
+
+  ### Action exercises ###
+
+  exercise:exists:
+    desc: Exercise the exists action with sample inputs.
+    cmds:
+      - |
+        # Simulate the exists action's composite step logic
+        value="example"
+        if [ -n "$value" ]; then echo "true"; else echo "false"; fi
+      - |
+        value=""
+        if [ -n "$value" ]; then echo "true"; else echo "false"; fi
+
+  ### Aggregate checks ###
+
+  check:
+    desc: Run the checks used by CI (e2e runs separately).
+    cmds:
+      - task: npm:ci
+      - task: test
+      - task: test:helm
+      - task: test:task
+      - task: lint:actions
+      - task: lint:shell
+      - task: lint:zizmor
+
+  check:full:
+    desc: Run all CI checks including action exercises.
+    cmds:
+      - task: check
+      - task: exercise:exists
